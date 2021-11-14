@@ -231,12 +231,16 @@ local function run_hooks(package, type)
   for i = 1, #hooks do
     local ok, err = pcall(hooks[i])
     if not ok then
+      package.error = true
       return false, err
     end
   end
 
   if #hooks ~= 0 then
-    logger:log("hook", string.format("ran %d %s for %s", #hooks, #hooks == 1 and "hook" or "hooks", package.id))
+    logger:log(
+      "hook",
+      string.format("ran %d %s %s for %s", #hooks, type, #hooks == 1 and "hook" or "hooks", package.id)
+    )
   end
 
   return true
@@ -249,6 +253,7 @@ local function ensure_added(package)
       package.added = true
       logger:log("vim", string.format("packadd completed for %s", package.id))
     else
+      package.error = true
       return false, err
     end
   end
@@ -257,7 +262,7 @@ local function ensure_added(package)
 end
 
 local function configure_recursive(package)
-  if not package.exists or not package.enabled then
+  if not package.exists or not package.enabled or package.error then
     return
   end
 
@@ -303,7 +308,7 @@ local function configure_recursive(package)
 end
 
 local function load_recursive(package)
-  if not package.exists or not package.enabled then
+  if not package.exists or not package.enabled or package.error then
     return
   end
 
@@ -359,6 +364,11 @@ local function reload_meta()
 end
 
 local function reload_all()
+  -- clear all errors and try again
+  for i = 1, #packages do
+    packages[i].error = false
+  end
+
   for i = 1, #package_roots do
     configure_recursive(package_roots[i])
   end
@@ -492,7 +502,6 @@ local function sync_list(list)
 end
 
 local function print_list(list)
-  local window = vim.api.nvim_get_current_win()
   local buffer = vim.api.nvim_create_buf(true, true)
   local line = 0
   local indent = 0
@@ -599,15 +608,19 @@ local function print_list(list)
     walk_graph(package_roots[i])
   end
 
+  vim.api.nvim_buf_set_name(buffer, "packages.dep")
   vim.api.nvim_buf_set_option(buffer, "bufhidden", "wipe")
   vim.api.nvim_buf_set_option(buffer, "modifiable", false)
-  vim.api.nvim_win_set_buf(window, buffer)
+
+  vim.cmd("sp")
+  vim.api.nvim_win_set_buf(0, buffer)
 end
 
 vim.cmd([[
   command! DepSync lua require("dep").sync()
-  command! DepList lua require("dep").list()
+  command! DepReload lua require("dep").reload()
   command! DepClean lua require("dep").clean()
+  command! DepList lua require("dep").list()
   command! DepLog lua require("dep").open_log()
   command! DepConfig lua require("dep").open_config()
 ]])
@@ -631,11 +644,12 @@ return setmetatable({
     sync_list(packages)
   end),
 
+  reload = wrap_api("dep.reload", reload_all),
+  clean = wrap_api("dep.clean", clean),
+
   list = wrap_api("dep.list", function()
     print_list(packages)
   end),
-
-  clean = wrap_api("dep.clean", clean),
 
   open_log = wrap_api("dep.open_log", function()
     vim.cmd("sp " .. logger.path)
@@ -648,7 +662,7 @@ return setmetatable({
   __call = function(self, config)
     config_path = debug.getinfo(2, "S").source:sub(2)
     initialized, err = pcall(function()
-      base_dir = config.base_dir or (vim.fn.stdpath("data") .. "/site/pack/deps/start/")
+      base_dir = config.base_dir or (vim.fn.stdpath("data") .. "/site/pack/deps/opt/")
       packages, package_roots = {}, {}
 
       register("chiyadev/dep")
