@@ -4,7 +4,7 @@ local proc = require("dep/proc")
 logger:open()
 
 local initialized, config_path, base_dir
-local packages, package_roots
+local packages, root
 
 local function get_name(id)
   local name = id:match("^[%w-_.]+/([%w-_.]+)$")
@@ -22,7 +22,7 @@ local function link_dependency(parent, child)
   end
 
   if not child.dependencies[parent.id] then
-    child.dependencies[parent.id], child.root = parent, false
+    child.dependencies[parent.id] = parent
     child.dependencies[#child.dependencies + 1] = parent
   end
 end
@@ -45,10 +45,11 @@ local function register(spec, overrides)
       added = false,
       configured = false,
       loaded = false,
+      subtree_configured = false,
+      subtree_loaded = false,
       on_setup = {},
       on_config = {},
       on_load = {},
-      root = true,
       dependencies = {}, -- inward edges
       dependents = {}, -- outward edges
     }
@@ -75,6 +76,11 @@ local function register(spec, overrides)
   package.on_setup[#package.on_setup + 1] = spec.setup
   package.on_config[#package.on_config + 1] = spec.config
   package.on_load[#package.on_load + 1] = spec[2]
+
+  -- every package is implicitly dependent on us, the package manager
+  if root and package ~= root then
+    link_dependency(root, package)
+  end
 
   if type(spec.requires) == "table" then
     for i = 1, #spec.requires do
@@ -128,10 +134,10 @@ local function register_recursive(list, overrides)
 end
 
 local function sort_dependencies()
+  -- we don't do topological sort, packages are loaded by traversing the graph recursively
+  -- any sorting is fine as long as the order is consistent and predictable
   local function compare(a, b)
-    local a_deps = #a.dependencies
-    local b_deps = #b.dependencies
-
+    local a_deps, b_deps = #a.dependencies, #b.dependencies
     if a_deps == b_deps then
       return a.id < b.id
     else
@@ -216,15 +222,6 @@ local function ensure_acyclic()
   end
 end
 
-local function find_roots()
-  for i = 1, #packages do
-    local package = packages[i]
-    if package.root then
-      package_roots[#package_roots + 1] = package
-    end
-  end
-end
-
 local function run_hooks(package, type)
   local hooks = package[type]
 
@@ -239,7 +236,7 @@ local function run_hooks(package, type)
   if #hooks ~= 0 then
     logger:log(
       "hook",
-      string.format("ran %d %s %s for %s", #hooks, type, #hooks == 1 and "hook" or "hooks", package.id)
+      string.format("triggered %d %s %s for %s", #hooks, type, #hooks == 1 and "hook" or "hooks", package.id)
     )
   end
 
@@ -262,7 +259,7 @@ local function ensure_added(package)
 end
 
 local function configure_recursive(package)
-  if not package.exists or not package.enabled or package.error then
+  if not package.exists or not package.enabled or package.error or package.subtree_configured then
     return
   end
 
@@ -271,8 +268,6 @@ local function configure_recursive(package)
       return
     end
   end
-
-  local propagate = false
 
   if not package.configured then
     local ok, err = run_hooks(package, "on_setup")
@@ -293,22 +288,21 @@ local function configure_recursive(package)
       return
     end
 
-    package.configured, package.loaded = true, false
-    propagate = true
-
+    package.configured = true
     logger:log("config", string.format("configured %s", package.id))
   end
 
-  for i = 1, #package.dependents do
-    local dependent = package.dependents[i]
+  package.subtree_configured = true
 
-    dependent.configured = dependent.configured and not propagate
-    configure_recursive(dependent)
+  for i = 1, #package.dependents do
+    package.subtree_configured = configure_recursive(package.dependents[i]) and package.subtree_configured
   end
+
+  return package.subtree_configured
 end
 
 local function load_recursive(package)
-  if not package.exists or not package.enabled or package.error then
+  if not package.exists or not package.enabled or package.error or package.subtree_loaded then
     return
   end
 
@@ -317,8 +311,6 @@ local function load_recursive(package)
       return
     end
   end
-
-  local propagate = false
 
   if not package.loaded then
     local ok, err = ensure_added(package)
@@ -334,17 +326,16 @@ local function load_recursive(package)
     end
 
     package.loaded = true
-    propagate = true
-
     logger:log("load", string.format("loaded %s", package.id))
   end
 
-  for i = 1, #package.dependents do
-    local dependent = package.dependents[i]
+  package.subtree_loaded = true
 
-    dependent.loaded = dependent.loaded and not propagate
-    load_recursive(dependent, force)
+  for i = 1, #package.dependents do
+    package.subtree_loaded = load_recursive(package.dependents[i]) and package.subtree_loaded
   end
+
+  return package.subtree_loaded
 end
 
 local function reload_meta()
@@ -363,21 +354,30 @@ local function reload_meta()
   end
 end
 
-local function reload_all()
-  -- clear all errors and try again
+local function reload()
+  -- clear errors to retry
   for i = 1, #packages do
     packages[i].error = false
   end
 
-  for i = 1, #package_roots do
-    configure_recursive(package_roots[i])
+  local reloaded
+  reloaded = configure_recursive(root) or reloaded
+  reloaded = load_recursive(root) or reloaded
+
+  if reloaded then
+    reload_meta()
   end
 
-  for i = 1, #package_roots do
-    load_recursive(package_roots[i])
+  return reloaded
+end
+
+local function reload_all()
+  for i = 1, #packages do
+    local package = packages[i]
+    package.loaded, package.subtree_loaded = false, false
   end
 
-  reload_meta()
+  reload()
 end
 
 local function clean()
@@ -416,6 +416,28 @@ local function clean()
   )
 end
 
+local function mark_reconfigure(package)
+  local function mark_dependencies(node)
+    node.subtree_configured, node.subtree_loaded = false, false
+
+    for i = 1, #node.dependencies do
+      mark_dependencies(node.dependencies[i])
+    end
+  end
+
+  local function mark_dependents(node)
+    node.configured, node.loaded, node.added = false, false, false
+    node.subtree_configured, node.subtree_loaded = false, false
+
+    for i = 1, #node.dependents do
+      mark_dependents(node.dependents[i])
+    end
+  end
+
+  mark_dependencies(package)
+  mark_dependents(package)
+end
+
 local function sync(package, cb)
   if not package.enabled then
     return
@@ -452,7 +474,7 @@ local function sync(package, cb)
                   if err then
                     log_err(message)
                   else
-                    package.added, package.configured = false, false
+                    mark_reconfigure(package)
                     logger:log("update", string.format("updated %s; %s -> %s", package.id, before, after))
                   end
 
@@ -469,7 +491,8 @@ local function sync(package, cb)
       if err then
         logger:log("error", string.format("failed to install %s; reason: %s", package.id, message))
       else
-        package.exists, package.added, package.configured = true, false, false
+        package.exists = true
+        mark_reconfigure(package)
         logger:log("install", string.format("installed %s", package.id))
       end
 
@@ -488,10 +511,12 @@ local function sync_list(list)
 
     if progress == #list then
       clean()
-      reload_all()
+      reload()
 
       if has_errors then
         logger:log("error", "there were errors during sync; see :messages or :DepLog for more information")
+      else
+        logger:log("update", string.format("synchronized %s %s", #list, #list == 1 and "package" or "packages"))
       end
     end
   end
@@ -501,7 +526,7 @@ local function sync_list(list)
   end
 end
 
-local function print_list(list)
+local function print_list()
   local buffer = vim.api.nvim_create_buf(true, true)
   local line = 0
   local indent = 0
@@ -539,19 +564,26 @@ local function print_list(list)
     line = line + 1
   end
 
-  print("Installed packages:")
-  indent = 1
+  print({
+    { "Installed packages:" },
+    { string.format(" (%s)", #packages), "Comment" },
+  })
 
+  indent = 1
   local loaded = {}
 
   local function dry_load(package)
+    if loaded[package.id] then
+      return
+    end
+
     for i = 1, #package.dependencies do
       if not loaded[package.dependencies[i].id] then
         return
       end
     end
 
-    loaded[package.id] = true
+    loaded[package.id], loaded[#loaded + 1] = true, package
 
     local line = {
       { "- ", "Comment" },
@@ -581,21 +613,33 @@ local function print_list(list)
     end
   end
 
-  for i = 1, #package_roots do
-    dry_load(package_roots[i])
-  end
-
+  dry_load(root)
   indent = 0
+
   print()
   print("Dependency graph:")
 
   local function walk_graph(package)
     indent = indent + 1
 
-    print({
+    local line = {
       { "| ", "Comment" },
       { package.id, "Underlined" },
-    })
+    }
+
+    local function add_edges(package)
+      for i = 1, #package.dependencies do
+        local dependency = package.dependencies[i]
+
+        if dependency ~= root then -- don't convolute the list
+          line[#line + 1] = { " " .. dependency.id, "Comment" }
+          add_edges(dependency)
+        end
+      end
+    end
+
+    add_edges(package)
+    print(line)
 
     for i = 1, #package.dependents do
       walk_graph(package.dependents[i])
@@ -604,9 +648,17 @@ local function print_list(list)
     indent = indent - 1
   end
 
-  for i = 1, #package_roots do
-    walk_graph(package_roots[i])
+  walk_graph(root)
+  indent = 0
+
+  print()
+  print("Debug information:")
+
+  local lines = {}
+  for l in vim.inspect(packages):gmatch("[^\n]+") do
+    lines[#lines + 1] = l
   end
+  vim.api.nvim_buf_set_lines(buffer, line, -1, false, lines)
 
   vim.api.nvim_buf_set_name(buffer, "packages.dep")
   vim.api.nvim_buf_set_option(buffer, "bufhidden", "wipe")
@@ -646,10 +698,7 @@ return setmetatable({
 
   reload = wrap_api("dep.reload", reload_all),
   clean = wrap_api("dep.clean", clean),
-
-  list = wrap_api("dep.list", function()
-    print_list(packages)
-  end),
+  list = wrap_api("dep.list", print_list),
 
   open_log = wrap_api("dep.open_log", function()
     vim.cmd("sp " .. logger.path)
@@ -663,14 +712,13 @@ return setmetatable({
     config_path = debug.getinfo(2, "S").source:sub(2)
     initialized, err = pcall(function()
       base_dir = config.base_dir or (vim.fn.stdpath("data") .. "/site/pack/deps/opt/")
-      packages, package_roots = {}, {}
+      packages = {}
 
-      register("chiyadev/dep")
+      root = register("chiyadev/dep")
       register_recursive(config)
       sort_dependencies()
       ensure_acyclic()
-      find_roots()
-      reload_all()
+      reload()
 
       local should_sync = function(package)
         if config.sync == "new" or config.sync == nil then

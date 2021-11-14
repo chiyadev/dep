@@ -4,7 +4,7 @@ local logger = {
 }
 
 local colors = {
-  skip = "Constant",
+  skip = "Comment",
   clean = "Boolean",
   install = "MoreMsg",
   update = "WarningMsg",
