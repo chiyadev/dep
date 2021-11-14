@@ -2,73 +2,83 @@ local logger = require("dep/log")
 local proc = {}
 
 function proc.exec(process, args, cwd, env, cb)
-  local out = vim.loop.new_pipe()
-  local buffer = {}
+  local handle, pid, buffer = nil, nil, {}
+  local stdout = vim.loop.new_pipe()
+  local stderr = vim.loop.new_pipe()
 
-  local handle = vim.loop.spawn(
+  handle, pid = vim.loop.spawn(
     process,
-    { args = args, cwd = cwd, env = env, stdio = { nil, out, out } },
+    { args = args, cwd = cwd, env = env, stdio = { nil, stdout, stderr } },
     vim.schedule_wrap(function(code)
       handle:close()
 
       local output = table.concat(buffer)
 
+      if output:sub(-1) == "\n" then
+        output = output:sub(1, -2)
+      end
+
       logger:log(
         process,
-        string.format('executed `%s` with args: "%s"\n%s', process, table.concat(args, '", "'), output)
+        string.format(
+          'executed `%s` (code=%s, pid=%s) with args: "%s"\n%s',
+          process,
+          code,
+          pid,
+          table.concat(args, '", "'),
+          output
+        )
       )
 
-      cb(code, output)
+      cb(code ~= 0, output)
     end)
   )
 
-  vim.loop.read_start(
-    out,
-    vim.schedule_wrap(function(_, data)
-      if data then
-        table.insert(buffer, data)
-      else
-        out:close()
-      end
-    end)
-  )
+  vim.loop.read_start(stdout, function(_, data)
+    if data then
+      buffer[#buffer + 1] = data
+    else
+      stdout:close()
+    end
+  end)
+
+  vim.loop.read_start(stderr, function(_, data)
+    if data then
+      buffer[#buffer + 1] = data
+    else
+      stderr:close()
+    end
+  end)
 end
 
 local git_env = { "GIT_TERMINAL_PROMPT=0" }
 
-function proc.git_current_commit(dir, cb)
-  exec("git", { "rev-parse", "HEAD" }, dir, git_env, cb)
+function proc.git_rev_parse(dir, arg, cb)
+  local args = { "rev-parse", "--short", arg }
+
+  proc.exec("git", args, dir, git_env, cb)
 end
 
 function proc.git_clone(dir, url, branch, cb)
-  local args = { "--depth=1", "--recurse-submodules", "--shallow-submodules", url, dir }
+  local args = { "clone", "--depth=1", "--recurse-submodules", "--shallow-submodules", url, dir }
 
   if branch then
-    table.insert(args, "--branch=" .. branch)
+    args[#args + 1] = "--branch=" .. branch
   end
 
-  exec("git", args, nil, git_env, cb)
+  proc.exec("git", args, nil, git_env, cb)
 end
 
-function proc.git_fetch(dir, branch, cb)
-  local args = { "--depth=1", "--recurse-submodules" }
+function proc.git_fetch(dir, remote, refspec, cb)
+  local args = { "fetch", "--depth=1", "--recurse-submodules", remote, refspec }
 
-  if branch then
-    table.insert(args, "origin")
-    table.insert(args, branch)
-  end
-
-  exec("git", args, dir, git_env, cb)
+  proc.exec("git", args, dir, git_env, cb)
 end
 
-function proc.git_reset(dir, branch, cb)
-  local args = { "--hard", "--recurse-submodules" }
+function proc.git_reset(dir, treeish, cb)
+  local args = { "reset", "--hard", "--recurse-submodules", treeish, "--" }
 
-  if branch then
-    table.insert("origin/" .. branch)
-  end
-
-  exec("git", args, dir, git_env, cb)
+  proc.exec("git", args, dir, git_env, cb)
 end
 
 return proc

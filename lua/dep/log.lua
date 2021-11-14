@@ -4,6 +4,8 @@ local logger = {
 }
 
 local colors = {
+  skip = "Constant",
+  clean = "Boolean",
   install = "MoreMsg",
   update = "WarningMsg",
   delete = "Directory",
@@ -32,28 +34,26 @@ function logger:close()
   end
 end
 
-function logger:log(op, message, cb)
-  if not self.silent and colors[op] then
-    vim.api.nvim_echo({
-      { "[dep]", "Identifier" },
-      { " " },
-      { message, colors[op] },
-    }, false, {})
-  end
+function logger:log(op, message)
+  local source = debug.getinfo(2, "Sl").short_src
 
-  if self.pipe then
-    local source = debug.getinfo(2, "Sl").short_src
-    local message = string.format("[%s] %s: %s\n", os.date(), source, message)
+  vim.schedule(function()
+    if type(message) ~= "string" then
+      message = vim.inspect(message)
+    end
 
-    self.pipe:write(
-      message,
-      vim.schedule_wrap(function(err)
-        if cb then
-          cb(err)
-        end
-      end)
-    )
-  end
+    if not self.silent and colors[op] then
+      vim.api.nvim_echo({
+        { "[dep]", "Identifier" },
+        { " " },
+        { message, colors[op] },
+      }, true, {})
+    end
+
+    if self.pipe then
+      self.pipe:write(string.format("[%s] %s: %s\n", os.date(), source, message))
+    end
+  end)
 end
 
 return logger
