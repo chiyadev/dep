@@ -3,8 +3,14 @@ local proc = require("dep/proc")
 
 logger:open()
 
-local initialized, config_path, base_dir
+local initialized, perf, config_path, base_dir
 local packages, root
+
+local function bench(name, code, ...)
+  local start = os.clock()
+  code(...)
+  perf[name] = os.clock() - start
+end
 
 local function get_name(id)
   local name = id:match("^[%w-_.]+/([%w-_.]+)$")
@@ -52,6 +58,7 @@ local function register(spec, overrides)
       on_load = {},
       dependencies = {}, -- inward edges
       dependents = {}, -- outward edges
+      perf = {},
     }
 
     packages[id] = package
@@ -120,6 +127,10 @@ local function register_recursive(list, overrides)
       local name, module = "<unnamed module>", list.modules[i]
 
       if type(module) == "string" then
+        if list.modules.prefix then
+          module = list.modules.prefix .. module
+        end
+
         name, module = module, require(module)
       end
 
@@ -224,6 +235,11 @@ end
 
 local function run_hooks(package, type)
   local hooks = package[type]
+  if #hooks == 0 then
+    return true
+  end
+
+  local start = os.clock()
 
   for i = 1, #hooks do
     local ok, err = pcall(hooks[i])
@@ -233,26 +249,36 @@ local function run_hooks(package, type)
     end
   end
 
-  if #hooks ~= 0 then
-    logger:log(
-      "hook",
-      string.format("triggered %d %s %s for %s", #hooks, type, #hooks == 1 and "hook" or "hooks", package.id)
-    )
-  end
+  package.perf[type] = os.clock() - start
+
+  logger:log(
+    "hook",
+    string.format("triggered %d %s %s for %s", #hooks, type, #hooks == 1 and "hook" or "hooks", package.id)
+  )
 
   return true
 end
 
 local function ensure_added(package)
   if not package.added then
-    local ok, err = pcall(vim.cmd, "packadd " .. package.name)
-    if ok then
-      package.added = true
-      logger:log("vim", string.format("packadd completed for %s", package.id))
-    else
+    local ok, err = run_hooks(package, "on_setup")
+    if not ok then
       package.error = true
       return false, err
     end
+
+    local start = os.clock()
+
+    ok, err = pcall(vim.cmd, "packadd " .. package.name)
+    if not ok then
+      package.error = true
+      return false, err
+    end
+
+    package.added = true
+    package.perf.pack = os.clock() - start
+
+    logger:log("vim", string.format("packadd completed for %s", package.id))
   end
 
   return true
@@ -270,13 +296,7 @@ local function configure_recursive(package)
   end
 
   if not package.configured then
-    local ok, err = run_hooks(package, "on_setup")
-    if not ok then
-      logger:log("error", string.format("failed to set up %s; reason: %s", package.id, err))
-      return
-    end
-
-    ok, err = ensure_added(package)
+    local ok, err = ensure_added(package)
     if not ok then
       logger:log("error", string.format("failed to configure %s; reason: %s", package.id, err))
       return
@@ -339,19 +359,21 @@ local function load_recursive(package)
 end
 
 local function reload_meta()
-  local ok, err = pcall(
-    vim.cmd,
-    [[
-      silent! helptags ALL
-      silent! UpdateRemotePlugins
-    ]]
-  )
+  bench("meta", function()
+    local ok, err = pcall(
+      vim.cmd,
+      [[
+        silent! helptags ALL
+        silent! UpdateRemotePlugins
+      ]]
+    )
 
-  if ok then
-    logger:log("vim", "reloaded helptags and remote plugins")
-  else
-    logger:log("error", string.format("failed to reload helptags and remote plugins; reason: %s", err))
-  end
+    if ok then
+      logger:log("vim", "reloaded helptags and remote plugins")
+    else
+      logger:log("error", string.format("failed to reload helptags and remote plugins; reason: %s", err))
+    end
+  end)
 end
 
 local function reload()
@@ -526,146 +548,225 @@ local function sync_list(list)
   end
 end
 
-local function print_list()
-  local buffer = vim.api.nvim_create_buf(true, true)
-  local line = 0
-  local indent = 0
+local function get_commits(cb)
+  local results = {}
+  local done = 0
+  for i = 1, #packages do
+    local package = packages[i]
 
-  local function print(chunks)
-    local concat = {}
-    local column = 0
+    if package.exists then
+      proc.git_rev_parse(package.dir, "HEAD", function(err, commit)
+        if not err then
+          results[package.id] = commit
+        end
 
-    for i = 1, indent do
-      concat[#concat + 1] = "  "
-      column = column + 2
-    end
-
-    if not chunks then
-      chunks = {}
-    elseif type(chunks) == "string" then
-      chunks = { { chunks } }
-    end
-
-    for i = 1, #chunks do
-      local chunk = chunks[i]
-      concat[#concat + 1] = chunk[1]
-      chunk.offset, column = column, column + #chunk[1]
-    end
-
-    vim.api.nvim_buf_set_lines(buffer, line, -1, false, { table.concat(concat) })
-
-    for i = 1, #chunks do
-      local chunk = chunks[i]
-      if chunk[2] then
-        vim.api.nvim_buf_add_highlight(buffer, -1, chunk[2], line, chunk.offset, chunk.offset + #chunk[1])
-      end
-    end
-
-    line = line + 1
-  end
-
-  print({
-    { "Installed packages:" },
-    { string.format(" (%s)", #packages), "Comment" },
-  })
-
-  indent = 1
-  local loaded = {}
-
-  local function dry_load(package)
-    if loaded[package.id] then
-      return
-    end
-
-    for i = 1, #package.dependencies do
-      if not loaded[package.dependencies[i].id] then
-        return
-      end
-    end
-
-    loaded[package.id], loaded[#loaded + 1] = true, package
-
-    local line = {
-      { "- ", "Comment" },
-      { package.id, "Underlined" },
-    }
-
-    if not package.exists then
-      line[#line + 1] = { " *not installed", "Comment" }
-    end
-
-    if not package.loaded then
-      line[#line + 1] = { " *not loaded", "Comment" }
-    end
-
-    if not package.enabled then
-      line[#line + 1] = { " *disabled", "Comment" }
-    end
-
-    if package.pin then
-      line[#line + 1] = { " *pinned", "Comment" }
-    end
-
-    print(line)
-
-    for i = 1, #package.dependents do
-      dry_load(package.dependents[i])
+        done = done + 1
+        if done == #packages then
+          cb(results)
+        end
+      end)
+    else
+      done = done + 1
     end
   end
+end
 
-  dry_load(root)
-  indent = 0
+local function print_list(cb)
+  get_commits(function(commits)
+    local buffer = vim.api.nvim_create_buf(true, true)
+    local line, indent = 0, 0
 
-  print()
-  print("Dependency graph:")
+    local function print(chunks)
+      local concat = {}
+      local column = 0
 
-  local function walk_graph(package)
-    indent = indent + 1
+      for i = 1, indent do
+        concat[#concat + 1] = "  "
+        column = column + 2
+      end
 
-    local line = {
-      { "| ", "Comment" },
-      { package.id, "Underlined" },
-    }
+      if not chunks then
+        chunks = {}
+      elseif type(chunks) == "string" then
+        chunks = { { chunks } }
+      end
 
-    local function add_edges(package)
-      for i = 1, #package.dependencies do
-        local dependency = package.dependencies[i]
+      for i = 1, #chunks do
+        local chunk = chunks[i]
+        concat[#concat + 1] = chunk[1]
+        chunk.offset, column = column, column + #chunk[1]
+      end
 
-        if dependency ~= root then -- don't convolute the list
-          line[#line + 1] = { " " .. dependency.id, "Comment" }
-          add_edges(dependency)
+      vim.api.nvim_buf_set_lines(buffer, line, -1, false, { table.concat(concat) })
+
+      for i = 1, #chunks do
+        local chunk = chunks[i]
+        if chunk[2] then
+          vim.api.nvim_buf_add_highlight(buffer, -1, chunk[2], line, chunk.offset, chunk.offset + #chunk[1])
         end
       end
+
+      line = line + 1
     end
 
-    add_edges(package)
-    print(line)
+    print(string.format("Installed packages (%s):", #packages))
+    indent = 1
 
-    for i = 1, #package.dependents do
-      walk_graph(package.dependents[i])
+    local loaded = {}
+
+    local function dry_load(package)
+      if loaded[package.id] then
+        return
+      end
+
+      for i = 1, #package.dependencies do
+        if not loaded[package.dependencies[i].id] then
+          return
+        end
+      end
+
+      loaded[package.id], loaded[#loaded + 1] = true, package
+
+      local line = {
+        { string.format("[%s] ", commits[package.id] or "       "), "Comment" },
+        { package.id, "Underlined" },
+      }
+
+      if not package.exists then
+        line[#line + 1] = { " *not installed", "Comment" }
+      end
+
+      if not package.loaded then
+        line[#line + 1] = { " *not loaded", "Comment" }
+      end
+
+      if not package.enabled then
+        line[#line + 1] = { " *disabled", "Comment" }
+      end
+
+      if package.pin then
+        line[#line + 1] = { " *pinned", "Comment" }
+      end
+
+      print(line)
+
+      for i = 1, #package.dependents do
+        dry_load(package.dependents[i])
+      end
     end
 
-    indent = indent - 1
-  end
+    dry_load(root)
+    indent = 0
 
-  walk_graph(root)
-  indent = 0
+    print()
+    print("Load time (μs):")
+    indent = 1
+    local profiles = {}
 
-  print()
-  print("Debug information:")
+    for i = 1, #packages do
+      local package = packages[i]
+      local profile = {
+        package = package,
+        total = 0,
+        setup = package.perf.on_setup or 0,
+        load = package.perf.on_load or 0,
+        pack = package.perf.pack or 0,
 
-  local lines = {}
-  for l in vim.inspect(packages):gmatch("[^\n]+") do
-    lines[#lines + 1] = l
-  end
-  vim.api.nvim_buf_set_lines(buffer, line, -1, false, lines)
+        "total",
+        "setup",
+        "pack",
+        "load",
+      }
 
-  vim.api.nvim_buf_set_name(buffer, "packages.dep")
-  vim.api.nvim_buf_set_option(buffer, "bufhidden", "wipe")
-  vim.api.nvim_buf_set_option(buffer, "modifiable", false)
+      if package == root then
+        for k, v in pairs(perf) do
+          if profile[k] then
+            profile[k] = profile[k] + v
+          end
+        end
+      end
 
-  vim.cmd("sp")
-  vim.api.nvim_win_set_buf(0, buffer)
+      for i = 1, #profile do
+        profile.total = profile.total + profile[profile[i]]
+      end
+
+      profiles[#profiles + 1] = profile
+    end
+
+    table.sort(profiles, function(a, b)
+      return a.total > b.total
+    end)
+
+    for i = 1, #profiles do
+      local profile = profiles[i]
+      local line = {
+        { "- ", "Comment" },
+        { profile.package.id, "Underlined" },
+        { string.rep(" ", 40 - #profile.package.id) },
+      }
+
+      for i = 1, #profile do
+        local key, value = profile[i], profile[profile[i]]
+        line[#line + 1] = { string.format(" %5s ", key), "Comment" }
+        line[#line + 1] = { string.format("%4d", value * 1000000) }
+      end
+
+      print(line)
+    end
+
+    indent = 0
+    print()
+    print("Dependency graph:")
+
+    local function walk_graph(package)
+      local line = {
+        { "| ", "Comment" },
+        { package.id, "Underlined" },
+      }
+
+      local function add_edges(package)
+        for i = 1, #package.dependencies do
+          local dependency = package.dependencies[i]
+
+          if dependency ~= root then -- don't convolute the list
+            line[#line + 1] = { " " .. dependency.id, "Comment" }
+            add_edges(dependency)
+          end
+        end
+      end
+
+      add_edges(package)
+      print(line)
+
+      for i = 1, #package.dependents do
+        indent = indent + 1
+        walk_graph(package.dependents[i])
+        indent = indent - 1
+      end
+    end
+
+    walk_graph(root)
+
+    print()
+    print("Debug information:")
+
+    local debug = {}
+    for l in vim.inspect(packages):gmatch("[^\n]+") do
+      debug[#debug + 1] = l
+    end
+
+    vim.api.nvim_buf_set_lines(buffer, line, -1, false, debug)
+    vim.api.nvim_buf_set_name(buffer, "packages.dep")
+    vim.api.nvim_buf_set_option(buffer, "bufhidden", "wipe")
+    vim.api.nvim_buf_set_option(buffer, "modifiable", false)
+
+    vim.cmd("sp")
+    vim.api.nvim_win_set_buf(0, buffer)
+
+    if cb then
+      cb()
+    end
+  end)
 end
 
 vim.cmd([[
@@ -709,15 +810,19 @@ return setmetatable({
   end),
 }, {
   __call = function(self, config)
+    perf = {}
     config_path = debug.getinfo(2, "S").source:sub(2)
     initialized, err = pcall(function()
       base_dir = config.base_dir or (vim.fn.stdpath("data") .. "/site/pack/deps/opt/")
       packages = {}
 
-      root = register("chiyadev/dep")
-      register_recursive(config)
-      sort_dependencies()
-      ensure_acyclic()
+      bench("load", function()
+        root = register("chiyadev/dep")
+        register_recursive(config)
+        sort_dependencies()
+        ensure_acyclic()
+      end)
+
       reload()
 
       local should_sync = function(package)
