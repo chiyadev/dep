@@ -67,7 +67,6 @@ local function register(spec, overrides)
 
   local prev_dir = package.dir -- optimization
 
-  -- meta
   package.name = spec.as or package.name or get_name(id)
   package.url = spec.url or package.url or ("https://github.com/" .. id .. ".git")
   package.branch = spec.branch or package.branch
@@ -229,7 +228,7 @@ local function ensure_acyclic()
     for i = 1, #cycle do
       names[i] = cycle[i].id
     end
-    error("circular dependency detected in package graph: " .. table.concat(names, " -> "))
+    error("circular dependency detected in package dependency graph: " .. table.concat(names, " -> "))
   end
 end
 
@@ -285,8 +284,12 @@ local function ensure_added(package)
 end
 
 local function configure_recursive(package)
-  if not package.exists or not package.enabled or package.error or package.subtree_configured then
+  if not package.exists or not package.enabled or package.error then
     return
+  end
+
+  if package.subtree_configured then
+    return true
   end
 
   for i = 1, #package.dependencies do
@@ -322,8 +325,12 @@ local function configure_recursive(package)
 end
 
 local function load_recursive(package)
-  if not package.exists or not package.enabled or package.error or package.subtree_loaded then
+  if not package.exists or not package.enabled or package.error then
     return
+  end
+
+  if package.subtree_loaded then
+    return true
   end
 
   for i = 1, #package.dependencies do
@@ -359,21 +366,22 @@ local function load_recursive(package)
 end
 
 local function reload_meta()
+  local ok, err
   bench("meta", function()
-    local ok, err = pcall(
+    ok, err = pcall(
       vim.cmd,
       [[
         silent! helptags ALL
         silent! UpdateRemotePlugins
       ]]
     )
-
-    if ok then
-      logger:log("vim", "reloaded helptags and remote plugins")
-    else
-      logger:log("error", string.format("failed to reload helptags and remote plugins; reason: %s", err))
-    end
   end)
+
+  if ok then
+    logger:log("vim", "reloaded helptags and remote plugins")
+  else
+    logger:log("error", string.format("failed to reload helptags and remote plugins; reason: %s", err))
+  end
 end
 
 local function reload()
@@ -580,7 +588,7 @@ local function print_list(cb)
       local concat = {}
       local column = 0
 
-      for i = 1, indent do
+      for _ = 1, indent do
         concat[#concat + 1] = "  "
         column = column + 2
       end
@@ -627,28 +635,28 @@ local function print_list(cb)
 
       loaded[package.id], loaded[#loaded + 1] = true, package
 
-      local line = {
+      local chunk = {
         { string.format("[%s] ", commits[package.id] or "       "), "Comment" },
         { package.id, "Underlined" },
       }
 
       if not package.exists then
-        line[#line + 1] = { " *not installed", "Comment" }
+        chunk[#chunk + 1] = { " *not installed", "Comment" }
       end
 
       if not package.loaded then
-        line[#line + 1] = { " *not loaded", "Comment" }
+        chunk[#chunk + 1] = { " *not loaded", "Comment" }
       end
 
       if not package.enabled then
-        line[#line + 1] = { " *disabled", "Comment" }
+        chunk[#chunk + 1] = { " *disabled", "Comment" }
       end
 
       if package.pin then
-        line[#line + 1] = { " *pinned", "Comment" }
+        chunk[#chunk + 1] = { " *pinned", "Comment" }
       end
 
-      print(line)
+      print(chunk)
 
       for i = 1, #package.dependents do
         dry_load(package.dependents[i])
@@ -686,8 +694,8 @@ local function print_list(cb)
         end
       end
 
-      for i = 1, #profile do
-        profile.total = profile.total + profile[profile[i]]
+      for j = 1, #profile do
+        profile.total = profile.total + profile[profile[j]]
       end
 
       profiles[#profiles + 1] = profile
@@ -699,19 +707,19 @@ local function print_list(cb)
 
     for i = 1, #profiles do
       local profile = profiles[i]
-      local line = {
+      local chunk = {
         { "- ", "Comment" },
         { profile.package.id, "Underlined" },
         { string.rep(" ", 40 - #profile.package.id) },
       }
 
-      for i = 1, #profile do
-        local key, value = profile[i], profile[profile[i]]
-        line[#line + 1] = { string.format(" %5s ", key), "Comment" }
-        line[#line + 1] = { string.format("%4d", value * 1000000) }
+      for j = 1, #profile do
+        local key, value = profile[j], profile[profile[j]]
+        chunk[#chunk + 1] = { string.format(" %5s ", key), "Comment" }
+        chunk[#chunk + 1] = { string.format("%4d", value * 1000000) }
       end
 
-      print(line)
+      print(chunk)
     end
 
     indent = 0
@@ -719,24 +727,25 @@ local function print_list(cb)
     print("Dependency graph:")
 
     local function walk_graph(package)
-      local line = {
+      local chunk = {
         { "| ", "Comment" },
         { package.id, "Underlined" },
       }
 
-      local function add_edges(package)
-        for i = 1, #package.dependencies do
-          local dependency = package.dependencies[i]
+      local function add_edges(p)
+        for i = 1, #p.dependencies do
+          local dependency = p.dependencies[i]
 
-          if dependency ~= root then -- don't convolute the list
-            line[#line + 1] = { " " .. dependency.id, "Comment" }
+          if dependency ~= root and not chunk[dependency.id] then -- don't convolute the list
+            chunk[#chunk + 1] = { " " .. dependency.id, "Comment" }
+            chunk[dependency.id] = true
             add_edges(dependency)
           end
         end
       end
 
       add_edges(package)
-      print(line)
+      print(chunk)
 
       for i = 1, #package.dependents do
         indent = indent + 1
@@ -809,9 +818,11 @@ return setmetatable({
     vim.cmd("sp " .. config_path)
   end),
 }, {
-  __call = function(self, config)
+  __call = function(_, config)
+    local err
     perf = {}
     config_path = debug.getinfo(2, "S").source:sub(2)
+
     initialized, err = pcall(function()
       base_dir = config.base_dir or (vim.fn.stdpath("data") .. "/site/pack/deps/opt/")
       packages = {}
