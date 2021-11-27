@@ -2,9 +2,8 @@
 
 > This readme is a work in progress.
 
-A versatile, declarative and correct
-[neovim](https://neovim.io/) package manager in [lua](https://www.lua.org/).
-Written for personal use by [phosphene47](https://github.com/phosphene47).
+A versatile, declarative and correct [neovim][2] package manager in [lua][3].
+Written for personal use by [phosphene47][4].
 
 What does that mean?
 
@@ -12,10 +11,12 @@ What does that mean?
 2. `declarative` - packages are declared using simple lua tables.
 3. `correct` - packages are always loaded in a correct and consistent order.
 
+Read [this blog post][1] for context.
+
 ## Requirements
 
-- [neovim](https://neovim.io/) 0.5+
-- [git](https://git-scm.com/)
+- [neovim][2] 0.5+
+- [git][5]
 
 ## Setup
 
@@ -284,9 +285,7 @@ require "dep" {
 ## Separating code into modules
 
 Suppose you split your `init.lua` into two files `packages/search.lua` and
-`packages/vcs.lua`, which declare the packages
-[telescope.nvim](https://github.com/nvim-telescope/telescope.nvim) and
-[vim-fugitive](https://github.com/tpope/vim-fugitive) respectively.
+`packages/vcs.lua`, which declare the packages [telescope.nvim][6] and [vim-fugitive][7] respectively.
 
 ```lua
 -- ~/.config/nvim/lua/packages/search.lua:
@@ -402,3 +401,11 @@ require "dep" {
 ## License
 
 dep is licensed under the [MIT License](LICENSE).
+
+[1]: https://chiya.dev/posts/2021-11-27-why-package-manager
+[2]: https://neovim.io/
+[3]: https://www.lua.org/
+[4]: https://github.com/phosphene47
+[5]: https://git-scm.com/
+[6]: https://github.com/nvim-telescope/telescope.nvim
+[7]: https://github.com/tpope/vim-fugitive
