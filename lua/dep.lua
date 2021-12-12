@@ -470,11 +470,13 @@ end
 
 local function sync(package, cb)
   if not package.enabled then
+    cb()
     return
   end
 
   if package.exists then
     if package.pin then
+      cb()
       return
     end
 

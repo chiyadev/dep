@@ -1,5 +1,10 @@
 # dep
 
+[![License](https://img.shields.io/github/license/chiyadev/dep)](License)
+[![Maintainer](https://img.shields.io/badge/maintainer-phosphene47-pink)][4]
+[![Issues](https://img.shields.io/github/issues/chiyadev/dep.svg)][8]
+[![Contributors](https://img.shields.io/github/contributors/chiyadev/dep.svg)][9]
+
 > This readme is a work in progress.
 
 A versatile, declarative and correct [neovim][2] package manager in [lua][3].
@@ -409,3 +414,5 @@ dep is licensed under the [MIT License](LICENSE).
 [5]: https://git-scm.com/
 [6]: https://github.com/nvim-telescope/telescope.nvim
 [7]: https://github.com/tpope/vim-fugitive
+[8]: https://GitHub.com/chiyadev/dep/issues
+[9]: https://github.com/chiyadev/dep/graphs/contributors
