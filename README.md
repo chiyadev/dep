@@ -1,6 +1,6 @@
 # dep
 
-[![License](https://img.shields.io/github/license/chiyadev/dep)](License)
+[![License](https://img.shields.io/github/license/chiyadev/dep)](LICENSE)
 [![Maintainer](https://img.shields.io/badge/maintainer-phosphene47-pink)][4]
 [![Issues](https://img.shields.io/github/issues/chiyadev/dep.svg)][8]
 [![Contributors](https://img.shields.io/github/contributors/chiyadev/dep.svg)][9]
