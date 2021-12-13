@@ -43,11 +43,15 @@ function logger:log(op, message)
     end
 
     if not self.silent and colors[op] then
-      vim.api.nvim_echo({
-        { "[dep]", "Identifier" },
-        { " " },
-        { message, colors[op] },
-      }, true, {})
+      if op == "error" then
+        vim.api.nvim_err_writeln(string.format("[dep] %s", message))
+      else
+        vim.api.nvim_echo({
+          { "[dep]", "Identifier" },
+          { " " },
+          { message, colors[op] },
+        }, true, {})
+      end
     end
 
     if self.pipe then
