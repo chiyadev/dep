@@ -240,6 +240,11 @@ local function run_hooks(package, type)
 
   local start = os.clock()
 
+  -- chdir into the package directory to make running external commands
+  -- from hooks easier.
+  local last_cwd = vim.fn.getcwd()
+  vim.fn.chdir(package.dir)
+
   for i = 1, #hooks do
     local ok, err = pcall(hooks[i])
     if not ok then
@@ -248,6 +253,7 @@ local function run_hooks(package, type)
     end
   end
 
+  vim.fn.chdir(last_cwd)
   package.perf[type] = os.clock() - start
 
   logger:log(
