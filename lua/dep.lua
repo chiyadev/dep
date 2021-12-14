@@ -248,6 +248,8 @@ local function run_hooks(package, type)
   for i = 1, #hooks do
     local ok, err = pcall(hooks[i])
     if not ok then
+      vim.fn.chdir(last_cwd)
+
       package.error = true
       return false, err
     end
