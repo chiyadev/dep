@@ -1,26 +1,26 @@
 # dep
 
 [![License](https://img.shields.io/github/license/chiyadev/dep)](LICENSE)
-[![Maintainer](https://img.shields.io/badge/maintainer-phosphene47-pink)][4]
+[![Maintainer](https://img.shields.io/badge/maintainer-luaneko-pink)][4]
 [![Issues](https://img.shields.io/github/issues/chiyadev/dep.svg)][8]
 [![Contributors](https://img.shields.io/github/contributors/chiyadev/dep.svg)][9]
 
 > This readme is a work in progress.
 
-A versatile, declarative and correct [neovim][2] package manager in [lua][3].
-Written for personal use by [phosphene47][4].
+A versatile, declarative and correct [neovim][2] package manager in [Lua][3].
+Written for personal use by [luaneko][4].
 
 What does that mean?
 
-1. `versatile` - packages can be declared in any lua file in any order of your liking.
-2. `declarative` - packages are declared using simple lua tables.
+1. `versatile` - packages can be declared in any Lua file in any order of your liking.
+2. `declarative` - packages are declared using simple Lua tables.
 3. `correct` - packages are always loaded in a correct and consistent order.
 
 Read [this blog post][1] for context.
 
 ## Requirements
 
-- [neovim][2] 0.5+
+- [neovim][2] 0.6+
 - [git][5]
 
 ## Setup
@@ -410,7 +410,7 @@ dep is licensed under the [MIT License](LICENSE).
 [1]: https://chiya.dev/posts/2021-11-27-why-package-manager
 [2]: https://neovim.io/
 [3]: https://www.lua.org/
-[4]: https://github.com/phosphene47
+[4]: https://github.com/luaneko
 [5]: https://git-scm.com/
 [6]: https://github.com/nvim-telescope/telescope.nvim
 [7]: https://github.com/tpope/vim-fugitive
