@@ -3,6 +3,12 @@ local logger = {
   silent = false,
 }
 
+local basepath = vim.fn.stdpath("cache")
+local dirExists = vim.loop.fs_stat(basepath)
+if dirExists == nil then
+  vim.loop.fs_mkdir(basepath, 0x1FF) -- 0777
+end
+
 local colors = {
   skip = "Comment",
   clean = "Boolean",
@@ -16,7 +22,7 @@ function logger:open(path)
   self:close()
 
   self.path = path or self.path
-  self.handle = vim.loop.fs_open(self.path, "w", 0x1A4) -- 0644
+  self.handle = assert(vim.loop.fs_open(self.path, "w", 0x1A4)) -- 0644
   self.pipe = vim.loop.new_pipe()
 
   self.pipe:open(self.handle)
