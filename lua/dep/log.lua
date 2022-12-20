@@ -6,7 +6,17 @@
 --
 --   https://opensource.org/licenses/MIT
 --
-local vim, setmetatable, pcall, debug, string, os = vim, setmetatable, pcall, debug, string, os
+local vim, setmetatable, pcall, debug, string, os, assert = vim, setmetatable, pcall, debug, string, os, assert
+
+local function default_log_path()
+  -- ensure cache directory exists (#5)
+  local path = vim.fn.stdpath("cache")
+  if not vim.loop.fs_stat(path) then
+    vim.loop.fs_mkdir(path, 0x1ff) -- 0777
+  end
+
+  return path .. "/dep.log"
+end
 
 local function try_format(...)
   local ok, s = pcall(string.format, ...)
@@ -67,10 +77,10 @@ local Logger = setmetatable({
 }, {
   --- Constructs a new `Logger`.
   __call = function(mt, path)
-    path = path or vim.fn.stdpath("cache") .. "/dep.log"
+    path = path or default_log_path()
 
     -- clear and open log file
-    local handle = vim.loop.fs_open(path, "w", 0x1b4) -- 0664
+    local handle = assert(vim.loop.fs_open(path, "w", 0x1a4)) -- 0644
     local pipe = vim.loop.new_pipe()
     pipe:open(handle)
 
