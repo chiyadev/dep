@@ -15,37 +15,11 @@ local function try_format(...)
   end
 end
 
--- Writes logs to a file and prints pretty status messages.
-local Logger = {
-  -- Constructs a new `Logger`.
-  new = function(mt, path)
-    path = path or vim.fn.stdpath("cache") .. "/dep.log"
-
-    -- clear and open log file
-    local handle = vim.loop.fs_open(path, "w", 0x1b4) -- 0664
-    local pipe = vim.loop.new_pipe()
-    pipe:open(handle)
-
-    return setmetatable({
-      path = path,
-      handle = handle,
-      pipe = pipe,
-      silent = false,
-
-      -- TODO: This looks good for me ;) but it should have proper vim color mapping for other people.
-      stage_colors = {
-        skip = "Comment",
-        clean = "Boolean",
-        install = "MoreMsg",
-        update = "WarningMsg",
-        delete = "Directory",
-        error = "ErrorMsg",
-      },
-    }, mt)
-  end,
-
+--- Writes logs to a file and prints pretty status messages.
+local Logger = setmetatable({
+  __metatable = "Logger",
   __index = {
-    -- Prints a message associated with a stage.
+    --- Prints a message associated with a stage.
     log = function(self, stage, message, ...)
       -- calling function
       local source = debug.getinfo(2, "Sl").short_src
@@ -77,7 +51,7 @@ local Logger = {
       end)
     end,
 
-    -- Closes the log file handle.
+    --- Closes the log file handle.
     close = function(self)
       if self.pipe then
         self.pipe:close()
@@ -90,9 +64,36 @@ local Logger = {
       end
     end,
   },
-}
+}, {
+  --- Constructs a new `Logger`.
+  __call = function(mt, path)
+    path = path or vim.fn.stdpath("cache") .. "/dep.log"
+
+    -- clear and open log file
+    local handle = vim.loop.fs_open(path, "w", 0x1b4) -- 0664
+    local pipe = vim.loop.new_pipe()
+    pipe:open(handle)
+
+    return setmetatable({
+      path = path,
+      handle = handle,
+      pipe = pipe,
+      silent = false,
+
+      -- TODO: This looks good for me ;) but it should have proper vim color mapping for other people.
+      stage_colors = {
+        skip = "Comment",
+        clean = "Boolean",
+        install = "MoreMsg",
+        update = "WarningMsg",
+        delete = "Directory",
+        error = "ErrorMsg",
+      },
+    }, mt)
+  end,
+})
 
 return {
   Logger = Logger,
-  global = Logger:new(),
+  global = Logger(),
 }

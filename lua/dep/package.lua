@@ -6,8 +6,8 @@
 --
 --   https://opensource.org/licenses/MIT
 --
-local require, type, setmetatable, error, assert, math, os, debug =
-  require, type, setmetatable, error, assert, math, os, debug
+local require, type, setmetatable, error, table, assert, math, os, debug =
+  require, type, setmetatable, error, table, assert, math, os, debug
 local logger = require("dep.log").global
 
 local function parse_name_from_id(id)
@@ -23,33 +23,11 @@ local function is_nonempty_str(s)
   return type(s) == "string" and #s ~= 0
 end
 
--- Package information.
-local Package = {
-  -- Constructs a new `Package` with the given identifier.
-  new = function(mt, id)
-    local name = parse_name_from_id(id)
-    return setmetatable({
-      id = id,
-      name = name,
-      url = "https://github.com/" .. id .. ".git",
-      enabled = true,
-      exists = false,
-      added = false,
-      configured = false,
-      loaded = false,
-      dependencies = {},
-      dependents = {},
-      subtree_configured = false,
-      subtree_loaded = false,
-      on_setup = {},
-      on_config = {},
-      on_load = {},
-      perf = { hooks = {} },
-    }, mt)
-  end,
-
+--- Package information.
+local Package = setmetatable({
+  __metatable = "Package",
   __index = {
-    -- Runs all registered hooks of the given type.
+    --- Runs all registered hooks of the given type.
     run_hooks = function(self, hook)
       local hooks = self["on_" .. hook]
       if not hooks or #hooks == 0 then
@@ -80,20 +58,36 @@ local Package = {
       return true
     end,
   },
-}
-
--- Manages a set of packages.
-local PackageStore = {
-  -- Constructs a new `PackageStore`.
-  new = function(mt)
-    -- hash part of store maps package ids to packages
-    -- array part of store is a list of packages
-    -- all packages in a store are unique based on their id
-    return setmetatable({}, mt)
+}, {
+  --- Constructs a new `Package` with the given identifier.
+  __call = function(mt, id)
+    local name = parse_name_from_id(id)
+    return setmetatable({
+      id = id,
+      name = name,
+      url = "https://github.com/" .. id .. ".git",
+      enabled = true,
+      exists = false,
+      added = false,
+      configured = false,
+      loaded = false,
+      dependencies = {},
+      dependents = {},
+      subtree_configured = false,
+      subtree_loaded = false,
+      on_setup = {},
+      on_config = {},
+      on_load = {},
+      perf = { hooks = {} },
+    }, mt)
   end,
+})
 
+--- Manages a set of packages.
+local PackageStore = setmetatable({
+  __metatable = "PackageStore",
   __index = {
-    -- Links the given packages such that the parent must load before the child.
+    --- Links the given packages such that the parent must load before the child.
     link_dependency = function(self, parent, child)
       if not parent.dependents[child.id] then
         parent.dependents[child.id] = child
@@ -106,7 +100,7 @@ local PackageStore = {
       end
     end,
 
-    -- Ensures the given package spec table is valid.
+    --- Ensures the given package spec table is valid.
     validate_spec = function(self, spec)
       assert(spec[1] ~= nil, "package id missing from spec")
       assert(type(spec[1]) == "string", "package id must be a string")
@@ -132,7 +126,7 @@ local PackageStore = {
       assert(spec[2] == nil or type(spec[2]) == "function", "package loader must be a function")
     end,
 
-    -- Creates or updates a package given the following spec table, and returns that package.
+    --- Creates or updates a package from the given spec table, and returns that package.
     add_spec = function(self, spec, scope)
       self:validate_spec(spec)
       scope = scope or {}
@@ -141,7 +135,7 @@ local PackageStore = {
       local pkg = self[id]
 
       if not pkg then
-        pkg = Package:new()
+        pkg = Package(id)
         self[id], self[#self + 1] = pkg, pkg
       end
 
@@ -169,7 +163,7 @@ local PackageStore = {
       end
     end,
 
-    -- Adds the given list of specs.
+    --- Adds the given list of specs.
     add_specs = function(self, specs, scope)
       assert(type(specs) == "table", "package list must be a table")
       assert(specs.pin == nil or type(specs.pin) == "boolean", "package list pin must be a boolean")
@@ -203,7 +197,7 @@ local PackageStore = {
       end
     end,
 
-    -- Ensures there are no circular dependencies in this package store.
+    --- Ensures there are no circular dependencies in this package store.
     ensure_acyclic = function(self)
       -- tarjan's strongly connected components algorithm
       local idx, indices, lowlink, stack = 0, {}, {}, {}
@@ -263,4 +257,17 @@ local PackageStore = {
       end
     end,
   },
+}, {
+  --- Constructs a new `PackageStore`.
+  __call = function(mt)
+    -- hash part of store maps package ids to packages
+    -- array part of store is a list of packages
+    -- all packages in a store are unique based on their id
+    return setmetatable({}, mt)
+  end,
+})
+
+return {
+  Package = Package,
+  PackageStore = PackageStore,
 }
