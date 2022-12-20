@@ -1,4 +1,4 @@
-local logger = require("dep/log")
+local logger = require("dep.log").global
 local proc = {}
 
 function proc.exec(process, args, cwd, env, cb)

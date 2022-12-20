@@ -1,63 +1,98 @@
-local logger = {
-  path = vim.fn.stdpath("cache") .. "/dep.log",
-  silent = false,
-}
+--
+-- Copyright (c) 2022 chiya.dev
+--
+-- Use of this source code is governed by the MIT License
+-- which can be found in the LICENSE file and at:
+--
+--   https://opensource.org/licenses/MIT
+--
+local vim, setmetatable, pcall, debug, string, os = vim, setmetatable, pcall, debug, string, os
 
-local colors = {
-  skip = "Comment",
-  clean = "Boolean",
-  install = "MoreMsg",
-  update = "WarningMsg",
-  delete = "Directory",
-  error = "ErrorMsg",
-}
-
-function logger:open(path)
-  self:close()
-
-  self.path = path or self.path
-  self.handle = vim.loop.fs_open(self.path, "w", 0x1A4) -- 0644
-  self.pipe = vim.loop.new_pipe()
-
-  self.pipe:open(self.handle)
-end
-
-function logger:close()
-  if self.pipe then
-    self.pipe:close()
-    self.pipe = nil
-  end
-
-  if self.handle then
-    vim.loop.fs_close(self.handle)
-    self.handle = nil
+local function try_format(...)
+  local ok, s = pcall(string.format, ...)
+  if ok then
+    return s
   end
 end
 
-function logger:log(op, message)
-  local source = debug.getinfo(2, "Sl").short_src
+-- Writes logs to a file and prints pretty status messages.
+local Logger = {
+  -- Constructs a new `Logger`.
+  new = function(mt, path)
+    path = path or vim.fn.stdpath("cache") .. "/dep.log"
 
-  vim.schedule(function()
-    if type(message) ~= "string" then
-      message = vim.inspect(message)
-    end
+    -- clear and open log file
+    local handle = vim.loop.fs_open(path, "w", 0x1b4) -- 0664
+    local pipe = vim.loop.new_pipe()
+    pipe:open(handle)
 
-    if not self.silent and colors[op] then
-      if op == "error" then
-        vim.api.nvim_err_writeln(string.format("[dep] %s", message))
+    return setmetatable({
+      path = path,
+      handle = handle,
+      pipe = pipe,
+      silent = false,
+
+      -- TODO: This looks good for me ;) but it should have proper vim color mapping for other people.
+      stage_colors = {
+        skip = "Comment",
+        clean = "Boolean",
+        install = "MoreMsg",
+        update = "WarningMsg",
+        delete = "Directory",
+        error = "ErrorMsg",
+      },
+    }, mt)
+  end,
+
+  __index = {
+    -- Prints a message associated with a stage.
+    log = function(self, stage, message, ...)
+      -- calling function
+      local source = debug.getinfo(2, "Sl").short_src
+
+      -- format or stringify message
+      if type(message) == "string" then
+        message = try_format(message, ...) or message
       else
-        vim.api.nvim_echo({
-          { "[dep]", "Identifier" },
-          { " " },
-          { message, colors[op] },
-        }, true, {})
+        message = vim.inspect(message)
       end
-    end
 
-    if self.pipe then
-      self.pipe:write(string.format("[%s] %s: %s\n", os.date(), source, message))
-    end
-  end)
-end
+      -- print and write must be done on the main event loop
+      vim.schedule(function()
+        if not self.silent then
+          if stage == "error" then
+            vim.api.nvim_err_writeln(string.format("[dep] %s", message))
+          elseif self.stage_colors[stage] then
+            vim.api.nvim_echo({
+              { "[dep]", "Identifier" },
+              { " " },
+              { message, self.stage_colors[stage] },
+            }, true, {})
+          end
+        end
 
-return logger
+        if self.pipe then
+          self.pipe:write(string.format("[%s] %s: %s\n", os.date(), source, message))
+        end
+      end)
+    end,
+
+    -- Closes the log file handle.
+    close = function(self)
+      if self.pipe then
+        self.pipe:close()
+        self.pipe = nil
+      end
+
+      if self.handle then
+        vim.loop.fs_close(self.handle)
+        self.handle = nil
+      end
+    end,
+  },
+}
+
+return {
+  Logger = Logger,
+  global = Logger:new(),
+}

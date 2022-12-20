@@ -1,7 +1,14 @@
-local logger = require("dep/log")
-local proc = require("dep/proc")
+--
+-- Copyright (c) 2022 chiya.dev
+--
+-- Use of this source code is governed by the MIT License
+-- which can be found in the LICENSE file and at:
+--
+--   https://opensource.org/licenses/MIT
+--
 
-logger:open()
+local logger = require("dep.log").global
+local proc = require("dep.proc")
 
 local initialized, perf, config_path, base_dir
 local packages, root
