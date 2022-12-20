@@ -8,7 +8,7 @@
 > This readme is a work in progress.
 
 A versatile, declarative and correct [neovim][2] package manager in [Lua][3].
-Written for personal use by [luaneko][4].
+Originally written for personal use by [luaneko][4].
 
 What does that mean?
 
@@ -16,12 +16,12 @@ What does that mean?
 2. `declarative` - packages are declared using simple Lua tables.
 3. `correct` - packages are always loaded in a correct and consistent order.
 
-Read [this blog post][1] for context.
+See also luaneko's [neovim-configs][10] for an example of how dep can be used in practice.
 
 ## Requirements
 
-- [neovim][2] 0.6+
-- [git][5]
+- [Neovim][2] 0.6+
+- [Git][5]
 
 ## Setup
 
@@ -416,3 +416,4 @@ dep is licensed under the [MIT License](LICENSE).
 [7]: https://github.com/tpope/vim-fugitive
 [8]: https://GitHub.com/chiyadev/dep/issues
 [9]: https://github.com/chiyadev/dep/graphs/contributors
+[10]: https://github.com/luaneko/neovim-config

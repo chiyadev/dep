@@ -4,7 +4,7 @@
 -- Use of this source code is governed by the MIT License
 -- which can be found in the LICENSE file and at:
 --
---   https://opensource.org/licenses/MIT
+--   https://chiya.dev/licenses/mit.txt
 --
 local require, type, setmetatable, error, table, assert, math, os, debug =
   require, type, setmetatable, error, table, assert, math, os, debug
