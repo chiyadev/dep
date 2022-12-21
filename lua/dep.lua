@@ -548,7 +548,7 @@ local function sync(package, cb)
   end
 end
 
-local function sync_list(list)
+local function sync_list(list, on_complete)
   local progress = 0
   local has_errors = false
 
@@ -564,6 +564,10 @@ local function sync_list(list)
         logger:log("error", "there were errors during sync; see :messages or :DepLog for more information")
       else
         logger:log("update", string.format("synchronized %s %s", #list, #list == 1 and "package" or "packages"))
+      end
+
+      if on_complete then
+        on_complete()
       end
     end
   end
@@ -819,8 +823,8 @@ end
 
 --todo: prevent multiple execution of async routines
 return setmetatable({
-  sync = wrap_api("dep.sync", function()
-    sync_list(packages)
+  sync = wrap_api("dep.sync", function(on_complete)
+    sync_list(packages, on_complete)
   end),
 
   reload = wrap_api("dep.reload", reload_all),
