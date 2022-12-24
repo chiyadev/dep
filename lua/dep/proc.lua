@@ -2,56 +2,39 @@ local logger = require("dep.log").global
 local proc = {}
 
 function proc.exec(process, args, cwd, env, cb)
-  local handle, pid, buffer = nil, nil, {}
-  local stdout = vim.loop.new_pipe()
-  local stderr = vim.loop.new_pipe()
+  local buffer = {}
 
-  handle, pid = vim.loop.spawn(
-    process,
-    { args = args, cwd = cwd, env = env, stdio = { nil, stdout, stderr } },
-    vim.schedule_wrap(function(code)
-      handle:close()
+  local function cb_output(_, data, _)
+    table.insert(buffer, table.concat(data))
+  end
 
-      local output = table.concat(buffer)
-
-      if output:sub(-1) == "\n" then
-        output = output:sub(1, -2)
-      end
-
-      logger:log(
-        process,
-        string.format(
-          'executed `%s` (code=%s, pid=%s) with args: "%s"\n%s',
-          process,
-          code,
-          pid,
-          table.concat(args, '", "'),
-          output
-        )
+  local function cb_exit(job_id, exit_code, _)
+    local output = table.concat(buffer)
+    logger:log(
+      process,
+      string.format(
+        'Job %s ["%s"] finished with exitcode %s\n%s',
+        job_id,
+        table.concat(args, '", "'),
+        exit_code,
+        output
       )
+    )
+    cb(exit_code ~= 0, output)
+  end
 
-      cb(code ~= 0, output)
-    end)
-  )
-
-  vim.loop.read_start(stdout, function(_, data)
-    if data then
-      buffer[#buffer + 1] = data
-    else
-      stdout:close()
-    end
-  end)
-
-  vim.loop.read_start(stderr, function(_, data)
-    if data then
-      buffer[#buffer + 1] = data
-    else
-      stderr:close()
-    end
-  end)
+  table.insert(args, 1, process)
+  vim.fn.jobstart(args, {
+    cwd = cwd,
+    env = env,
+    stdin = nil,
+    on_exit = cb_exit,
+    on_stdout = cb_output,
+    on_stderr = cb_output,
+  })
 end
 
-local git_env = { "GIT_TERMINAL_PROMPT=0" }
+local git_env = { GIT_TERMINAL_PROMPT = 0 }
 
 function proc.git_rev_parse(dir, arg, cb)
   local args = { "rev-parse", "--short", arg }
